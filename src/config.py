@@ -44,6 +44,9 @@ DIETARY_HABITS_ORDER = ['Unhealthy', 'Moderate', 'Healthy']
 # Garbage/Cleaning Constants
 INVALID_VALUES = ['Error', 'Null', '??', '#VALUE!', 'Not Available', 'Twenty', 'nan']
 TEXT_TO_NUMERIC_MAPPING = {
-    'Low': 1, 
     'High': 5
 }
+
+# Selected Features (Dynamic Selection Implemented in Pipeline)
+# The lists below are removed as feature selection is now handled dynamically 
+# by AggregatedFeatureSelector in the pipeline.
