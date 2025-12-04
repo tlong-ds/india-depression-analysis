@@ -12,7 +12,7 @@ This project implements a comprehensive machine learning pipeline to analyze and
 | No. | Name | Student ID | Class |
 |-----|------|------------|-------|
 | 1 | Nguyễn Thị Vân Anh | 11230603 | DSEB 65B |
-| 2 | Nguyễn Mạnh Cường | 112305 | DSEB 65B |
+| 2 | Nguyễn Mạnh Cường | 11230521 | DSEB 65B |
 | 3 | Trần Thu Hiền | 11230534 | DSEB 65B |
 | 4 | Lý Thành Long | 11230561 | DSEB 65B |
 | 5 | Nguyễn Thanh Mơ | 11230571 | DSEB 65B |
