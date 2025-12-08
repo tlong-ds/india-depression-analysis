@@ -6,6 +6,8 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder, OrdinalEncoder
 from sklearn.impute import SimpleImputer, KNNImputer
 from sklearn.ensemble import RandomForestClassifier
 import warnings
+import joblib
+import os
 
 from src.config import (
     NUMERIC_FEATURES_COMMON, CATEGORICAL_FEATURES_COMMON, ORDINAL_FEATURES,
@@ -17,14 +19,16 @@ from src.transformers import (
     SequentialImputer, FeatureEngineer, PandasOrdinalEncoder,
     RoleCorrector, CityCleaner, DegreeCleaner, ProfessionCleaner, 
     SleepDurationCleaner, WorkStudyHoursOutlierClipper, AggregatedFeatureSelector,
-    CategoricalTypeCaster
+    CategoricalTypeCaster, FrequencyEncoder
 )
 
 def create_student_pipeline():
     """Creates the pipeline for student data."""
     # Base features
     numeric_features = NUMERIC_FEATURES_COMMON + STUDENT_SPECIFIC_NUMERIC
-    categorical_features = CATEGORICAL_FEATURES_COMMON
+    # Remove City from categorical features for OneHotEncoding, as we will use FrequencyEncoding
+    categorical_features = [f for f in CATEGORICAL_FEATURES_COMMON if f != 'City']
+    high_card_features = ['City']
     ordinal_features = ORDINAL_FEATURES
 
     # Engineered features (Numeric)
@@ -60,16 +64,7 @@ def create_student_pipeline():
     # 2. Sequential Imputation (Handles CGPA -> Likert -> Age)
     imputation_pipeline = SequentialImputer(n_neighbors=5)
 
-    # 3. Ordinal Encoding (Early, to support Feature Engineering)
-    ordinal_encoder = PandasOrdinalEncoder(mapping={
-        'Sleep Duration': SLEEP_DURATION_ORDER,
-        'Dietary Habits': DIETARY_HABITS_ORDER
-    })
-
-    # 4. Feature Engineering
-    feature_engineer = FeatureEngineer()
-
-    # 5. Outlier Clipping (Post-Imputation/Engineering)
+    # 3. Outlier Clipping (Moved to before encoding, matching notebook)
     outlier_clipper = OutlierClipper(ranges={
         'Age': (10, 90),
         'CGPA': (0, 10),
@@ -77,42 +72,45 @@ def create_student_pipeline():
         'Study Satisfaction': (0, 5),
         'Financial Stress': (0, 5)
     })
-    
-    # 6. Select Features for Encoding/Selection (Drop irrelevant columns like 'Name', 'Role')
-    features_to_keep = numeric_features + categorical_features + ordinal_features + engineered_features
-    selector = DataFrameSelector(columns=features_to_keep)
 
-    # 7. Encoding (OneHot for Categorical, PassThrough for Numeric)
-    # This ensures all data passed to Feature Selection is numeric.
-    # We use remainder='passthrough' to keep numeric/ordinal/engineered features.
-    encoder = ColumnTransformer(
+    # 4. Master Encoding (Ordinal + OneHot + Frequency)
+    # This replaces the separate ordinal and onehot/frequency steps and handles feature selection
+    ordinal_encoder = OrdinalEncoder(
+        categories=[SLEEP_DURATION_ORDER, DIETARY_HABITS_ORDER],
+        handle_unknown='use_encoded_value',
+        unknown_value=np.nan,
+        encoded_missing_value=np.nan
+    )
+
+    master_encoder = ColumnTransformer(
         transformers=[
-            ('cat', OneHotEncoder(sparse_output=False, handle_unknown='ignore'), categorical_features)
+            ('ordinal', ordinal_encoder, ordinal_features),
+            ('high_card', FrequencyEncoder(), high_card_features),
+            ('cat', OneHotEncoder(sparse_output=False, handle_unknown='ignore'), categorical_features),
+            ('num', 'passthrough', numeric_features)
         ],
-        remainder='passthrough',
+        remainder='drop', # Drop Name, Role, etc.
         verbose_feature_names_out=False
     ).set_output(transform="pandas")
 
-    # 8. Feature Selection (Dynamic)
-    # Select top 10 features based on training data
-    feature_selector = AggregatedFeatureSelector(n_features=10)
+    # 5. Feature Engineering (Works on encoded data)
+    feature_engineer = FeatureEngineer()
 
-    # 9. Final Preprocessing (Scaling)
-    # Since feature selector returns a DataFrame with selected columns (all numeric/encoded),
-    # we can just scale them.
+    # 6. Final Preprocessing (Scaling)
     final_scaler = StandardScaler().set_output(transform="pandas")
 
-    # 10. Full Pipeline
+    # 7. Feature Selection (Dynamic)
+    feature_selector = AggregatedFeatureSelector(n_features=10)
+
+    # 8. Full Pipeline
     pipeline = Pipeline([
         ('cleaning', cleaning_pipeline),
         ('imputation', imputation_pipeline),
-        ('ordinal_encoding', ordinal_encoder),
-        ('feature_engineering', feature_engineer),
         ('outlier_clipping', outlier_clipper),
-        ('selector', selector),
-        ('encoding', encoder),
-        ('feature_selection', feature_selector),
+        ('encoding', master_encoder),
+        ('feature_engineering', feature_engineer),
         ('scaling', final_scaler),
+        ('feature_selection', feature_selector),
         ('classifier', RandomForestClassifier(random_state=42))
     ])
     
@@ -121,8 +119,11 @@ def create_student_pipeline():
 def create_worker_pipeline():
     """Creates the pipeline for working professional data."""
     # Base features
+    # Base features
     numeric_features = NUMERIC_FEATURES_COMMON + WORKER_SPECIFIC_NUMERIC
-    categorical_features = CATEGORICAL_FEATURES_COMMON + WORKER_SPECIFIC_CATEGORICAL
+    # Remove City from categorical features for OneHotEncoding
+    categorical_features = [f for f in (CATEGORICAL_FEATURES_COMMON + WORKER_SPECIFIC_CATEGORICAL) if f != 'City']
+    high_card_features = ['City']
     ordinal_features = ORDINAL_FEATURES
 
     # Engineered features (Numeric)
@@ -157,16 +158,7 @@ def create_worker_pipeline():
     # 2. Sequential Imputation
     imputation_pipeline = SequentialImputer(n_neighbors=5)
 
-    # 3. Ordinal Encoding
-    ordinal_encoder = PandasOrdinalEncoder(mapping={
-        'Sleep Duration': SLEEP_DURATION_ORDER,
-        'Dietary Habits': DIETARY_HABITS_ORDER
-    })
-
-    # 4. Feature Engineering
-    feature_engineer = FeatureEngineer()
-
-    # 5. Outlier Clipping
+    # 3. Outlier Clipping
     outlier_clipper = OutlierClipper(ranges={
         'Age': (10, 90),
         'Work Pressure': (0, 5),
@@ -174,39 +166,43 @@ def create_worker_pipeline():
         'Financial Stress': (0, 5)
     })
 
+    # 4. Master Encoding
+    ordinal_encoder = OrdinalEncoder(
+        categories=[SLEEP_DURATION_ORDER, DIETARY_HABITS_ORDER],
+        handle_unknown='use_encoded_value',
+        unknown_value=np.nan,
+        encoded_missing_value=np.nan
+    )
 
-
-    # 6. Select Features for Encoding/Selection
-    features_to_keep = numeric_features + categorical_features + ordinal_features + engineered_features
-    selector = DataFrameSelector(columns=features_to_keep)
-
-    # 7. Encoding (OneHot for Categorical, PassThrough for Numeric)
-    encoder = ColumnTransformer(
+    master_encoder = ColumnTransformer(
         transformers=[
-            ('cat', OneHotEncoder(sparse_output=False, handle_unknown='ignore'), categorical_features)
+            ('ordinal', ordinal_encoder, ordinal_features),
+            ('high_card', FrequencyEncoder(), high_card_features),
+            ('cat', OneHotEncoder(sparse_output=False, handle_unknown='ignore'), categorical_features),
+            ('num', 'passthrough', numeric_features)
         ],
-        remainder='passthrough',
+        remainder='drop',
         verbose_feature_names_out=False
     ).set_output(transform="pandas")
 
-    # 8. Feature Selection (Dynamic)
-    # Select top 10 features based on training data
-    feature_selector = AggregatedFeatureSelector(n_features=10)
+    # 5. Feature Engineering
+    feature_engineer = FeatureEngineer()
 
-    # 9. Final Preprocessing (Scaling)
+    # 6. Final Preprocessing (Scaling)
     final_scaler = StandardScaler().set_output(transform="pandas")
 
-    # 10. Full Pipeline
+    # 7. Feature Selection (Dynamic)
+    feature_selector = AggregatedFeatureSelector(n_features=10)
+
+    # 8. Full Pipeline
     pipeline = Pipeline([
         ('cleaning', cleaning_pipeline),
         ('imputation', imputation_pipeline),
-        ('ordinal_encoding', ordinal_encoder),
-        ('feature_engineering', feature_engineer),
         ('outlier_clipping', outlier_clipper),
-        ('selector', selector),
-        ('encoding', encoder),
-        ('feature_selection', feature_selector),
+        ('encoding', master_encoder),
+        ('feature_engineering', feature_engineer),
         ('scaling', final_scaler),
+        ('feature_selection', feature_selector),
         ('classifier', RandomForestClassifier(random_state=42))
     ])
     
@@ -301,3 +297,17 @@ class DepressionAnalysisSystem:
             results.loc[worker_mask] = worker_probs
             
         return results
+
+    def save_model(self, filepath):
+        """Saves the trained model to a file."""
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        joblib.dump(self, filepath)
+        print(f"Model saved to {filepath}")
+
+    @staticmethod
+    def load_model(filepath):
+        """Loads a trained model from a file."""
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"Model file not found: {filepath}")
+        return joblib.load(filepath)

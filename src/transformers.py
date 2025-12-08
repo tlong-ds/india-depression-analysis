@@ -12,6 +12,41 @@ from src.config import (
     SLEEP_DURATION_ORDER, DIETARY_HABITS_ORDER
 )
 
+class FrequencyEncoder(BaseEstimator, TransformerMixin):
+    """
+    Encodes high-cardinality categorical features using their frequency distribution.
+    """
+    def __init__(self):
+        self.freq_maps = {}
+
+    def fit(self, X, y=None):
+        # Ensure X is a DataFrame
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+            
+        for col in X.columns:
+            self.freq_maps[col] = X[col].value_counts(normalize=True).to_dict()
+        return self
+
+    def transform(self, X):
+        # Ensure X is a DataFrame
+        if not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+            
+        X_transformed = X.copy()
+        for col in X_transformed.columns:
+            if col in self.freq_maps:
+                X_transformed[col] = X_transformed[col].map(self.freq_maps[col]).fillna(0).astype(float)
+        return X_transformed
+
+    def get_feature_names_out(self, input_features=None):
+        if input_features is None:
+            return list(self.freq_maps.keys())
+        return input_features
+
+    def set_output(self, *, transform=None):
+        return self
+
 class PandasOrdinalEncoder(BaseEstimator, TransformerMixin):
     """
     Applies OrdinalEncoder to specific columns and returns the entire DataFrame.
@@ -475,6 +510,8 @@ class SequentialImputer(BaseEstimator, TransformerMixin):
         self.imputer_likert_worker = ScaledKNNImputer(n_neighbors=n_neighbors)
         self.imputer_age_student = ScaledKNNImputer(n_neighbors=n_neighbors)
         self.imputer_age_worker = ScaledKNNImputer(n_neighbors=n_neighbors)
+        self.imputer_hours_student = ScaledKNNImputer(n_neighbors=n_neighbors)
+        self.imputer_hours_worker = ScaledKNNImputer(n_neighbors=n_neighbors)
 
     def fit(self, X, y=None):
         # We need to fit each internal imputer on the relevant subset of data
@@ -522,6 +559,19 @@ class SequentialImputer(BaseEstimator, TransformerMixin):
         worker_age_cols = [c for c in worker_age_cols if c in X.columns]
         if worker_mask.any():
             self.imputer_age_worker.fit(X.loc[worker_mask, worker_age_cols])
+
+        # 4. Work/Study Hours
+        # Student
+        student_hours_cols = ['Age', 'CGPA', 'Academic Pressure', 'Study Satisfaction', 'Financial Stress', 'Work/Study Hours']
+        student_hours_cols = [c for c in student_hours_cols if c in X.columns]
+        if student_mask.any():
+            self.imputer_hours_student.fit(X.loc[student_mask, student_hours_cols])
+            
+        # Worker
+        worker_hours_cols = ['Age', 'Work Pressure', 'Job Satisfaction', 'Financial Stress', 'Work/Study Hours']
+        worker_hours_cols = [c for c in worker_hours_cols if c in X.columns]
+        if worker_mask.any():
+            self.imputer_hours_worker.fit(X.loc[worker_mask, worker_hours_cols])
             
         return self
 
@@ -620,6 +670,37 @@ class SequentialImputer(BaseEstimator, TransformerMixin):
             else:
                 idx = worker_age_cols.index('Age')
                 X.loc[worker_mask, 'Age'] = imputed[:, idx].astype(int)
+
+        # --- 4. Work/Study Hours ---
+        # Impute Student Hours
+        student_hours_cols = ['Age', 'CGPA', 'Academic Pressure', 'Study Satisfaction', 'Financial Stress', 'Work/Study Hours']
+        student_hours_cols = [c for c in student_hours_cols if c in X.columns]
+        
+        if student_mask.any() and 'Work/Study Hours' in X.columns:
+            imputed = self.imputer_hours_student.transform(X.loc[student_mask, student_hours_cols])
+            if isinstance(imputed, pd.DataFrame):
+                vals = imputed['Work/Study Hours']
+            else:
+                idx = student_hours_cols.index('Work/Study Hours')
+                vals = imputed[:, idx]
+            
+            # Post-processing: Clip 0-24, Round, Int
+            X.loc[student_mask, 'Work/Study Hours'] = np.round(np.clip(vals, 0, 24)).astype(int)
+
+        # Impute Worker Hours
+        worker_hours_cols = ['Age', 'Work Pressure', 'Job Satisfaction', 'Financial Stress', 'Work/Study Hours']
+        worker_hours_cols = [c for c in worker_hours_cols if c in X.columns]
+        
+        if worker_mask.any() and 'Work/Study Hours' in X.columns:
+            imputed = self.imputer_hours_worker.transform(X.loc[worker_mask, worker_hours_cols])
+            if isinstance(imputed, pd.DataFrame):
+                vals = imputed['Work/Study Hours']
+            else:
+                idx = worker_hours_cols.index('Work/Study Hours')
+                vals = imputed[:, idx]
+                
+            # Post-processing: Clip 0-24, Round, Int
+            X.loc[worker_mask, 'Work/Study Hours'] = np.round(np.clip(vals, 0, 24)).astype(int)
 
         return X
 

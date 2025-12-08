@@ -81,16 +81,15 @@ The pipeline reproduces and operationalizes the logic found in the exploratory d
 To run the pipeline (train the model if it doesn't exist, and generate predictions):
 
 ```bash
-python main.py
+python run_pipeline.py
 ```
 
-### What `main.py` does:
-1. **Loads Data**: Reads the dataset from `dataset/clean_depression_dataset.csv`.
-2. **Model Management**:
-   - Checks if a trained model exists at `model/full_depression_model.joblib`.
-   - If found, it loads the model.
-   - If not found, it initializes the `DepressionAnalysisSystem`, fits it on the data, and saves the trained model.
-3. **Prediction**: Generates class predictions and probabilities for the input data.
+### What `run_pipeline.py` does:
+1. **Loads Data**: Reads the raw dataset from `raw/raw_depression_dataset.csv`.
+2. **Preprocessing**: Splits the data into training and testing sets (stratified).
+3. **Training**: Initializes and trains the `DepressionAnalysisSystem` pipeline, which handles data cleaning, imputation, feature engineering, and modeling for both Students and Working Professionals.
+4. **Evaluation**: Evaluates the model on the test set and prints detailed classification reports.
+5. **Prediction**: Demonstrates how to predict depression status for new, synthetic user instances.
 
 ## Pipeline Details
 
